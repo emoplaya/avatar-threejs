@@ -1,9 +1,10 @@
 import { CameraControls, Environment, Gltf, Html } from "@react-three/drei";
 import { Bloom, EffectComposer } from "@react-three/postprocessing";
 import { useControls } from "leva";
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 import { VRMAvatar } from "./VRMAvatar";
 import { GLBAvatar } from "./GLBAvatar";
+import { BonesInfoPanel } from "./BonesInfoPanel";
 
 export const Experience = () => {
   const controls = useRef();
@@ -11,10 +12,13 @@ export const Experience = () => {
   const [playDactyl, setPlayDactyl] = useState(false);
   const [inputText, setInputText] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
+  const [bonesData, setBonesData] = useState([]);
+  const [showBonesInfo, setShowBonesInfo] = useState(false);
+  const [currentLetter, setCurrentLetter] = useState("");
+  const avatarRef = useRef();
 
-  const { avatar, avatarType, animation, showDactylControls } = useControls(
-    "Avatar",
-    {
+  const { avatar, avatarType, animation, showDactylControls, showBonesPanel } =
+    useControls("Avatar", {
       avatarType: {
         value: "VRM",
         options: ["VRM", "GLB"],
@@ -26,7 +30,7 @@ export const Experience = () => {
           "3859814441197244330.vrm",
           "3636451243928341470.vrm",
           "8087383217573817818.vrm",
-          "avatar2.glb", // Убедитесь, что у вас есть эта модель
+          "avatar2.glb",
         ],
       },
       animation: {
@@ -37,12 +41,16 @@ export const Experience = () => {
         value: true,
         label: "Показать управление дактилем",
       },
-    }
-  );
+      showBonesPanel: {
+        value: false,
+        label: "Показать координаты костей",
+      },
+    });
 
   const handleStopDactyl = () => {
     setPlayDactyl(false);
     setIsProcessing(false);
+    setCurrentLetter("");
   };
 
   const handlePlayDactyl = () => {
@@ -71,9 +79,29 @@ export const Experience = () => {
     setInputText("");
     setDactylText("");
     setPlayDactyl(false);
+    setCurrentLetter("");
   };
 
-  // Дополнительная информация о поддерживаемых символах
+  const handleBonesUpdate = (bones) => {
+    setBonesData(bones);
+  };
+
+  // Обновляем текущую букву при воспроизведении
+  useEffect(() => {
+    if (playDactyl && avatarRef.current) {
+      const interval = setInterval(() => {
+        if (avatarRef.current.getCurrentLetter) {
+          const letter = avatarRef.current.getCurrentLetter();
+          if (letter && letter !== currentLetter) {
+            setCurrentLetter(letter);
+          }
+        }
+      }, 100);
+
+      return () => clearInterval(interval);
+    }
+  }, [playDactyl, currentLetter]);
+
   const supportedLetters = "а-я, ё, ъ, ы, ь, пробел";
   const exampleText = "Привет мир";
 
@@ -85,7 +113,7 @@ export const Experience = () => {
         minDistance={1}
         maxDistance={10}
       />
-      <Environment preset="sunset" />
+
       <directionalLight intensity={2} position={[10, 10, 5]} />
       <directionalLight intensity={1} position={[-10, 10, 5]} />
 
@@ -102,6 +130,7 @@ export const Experience = () => {
             border: "3px solid rgba(255, 255, 255, 0.3)",
             boxShadow: "0 10px 30px rgba(0,0,0,0.5)",
             backdropFilter: "blur(10px)",
+            zIndex: 1000,
           }}
         >
           <div
@@ -121,6 +150,33 @@ export const Experience = () => {
             >
               ✋ Дактильный алфавит
             </h3>
+
+            {currentLetter && isProcessing && (
+              <div
+                style={{
+                  marginBottom: "15px",
+                  padding: "10px",
+                  backgroundColor: "rgba(79, 195, 247, 0.2)",
+                  borderRadius: "8px",
+                  textAlign: "center",
+                  border: "2px solid #4FC3F7",
+                }}
+              >
+                <div style={{ fontSize: "14px", color: "#B0BEC5" }}>
+                  Текущая буква:
+                </div>
+                <div
+                  style={{
+                    fontSize: "48px",
+                    fontWeight: "bold",
+                    color: "#4FC3F7",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  {currentLetter}
+                </div>
+              </div>
+            )}
 
             <div style={{ marginBottom: "20px" }}>
               <label
@@ -297,8 +353,33 @@ export const Experience = () => {
                 быстрого воспроизведения
               </div>
             </div>
+
+            <div
+              style={{
+                marginTop: "20px",
+                paddingTop: "15px",
+                borderTop: "1px solid #444",
+              }}
+            >
+              <label
+                style={{ display: "flex", alignItems: "center", gap: "10px" }}
+              >
+                <input
+                  type="checkbox"
+                  checked={showBonesInfo}
+                  onChange={(e) => setShowBonesInfo(e.target.checked)}
+                  style={{ width: "18px", height: "18px" }}
+                />
+                <span>Показать координаты костей</span>
+              </label>
+            </div>
           </div>
         </Html>
+      )}
+
+      {/* Панель с координатами костей */}
+      {showBonesInfo && bonesData.length > 0 && (
+        <BonesInfoPanel bonesData={bonesData} />
       )}
 
       {/* Добавляем стили для анимации спиннера */}
@@ -316,11 +397,15 @@ export const Experience = () => {
           <VRMAvatar avatar={avatar} />
         ) : (
           <GLBAvatar
+            ref={avatarRef}
             avatar={avatar}
             animation={animation}
             userText={dactylText}
             playDactyl={playDactyl}
             onStopDactyl={handleStopDactyl}
+            showBones={showBonesInfo}
+            onBonesUpdate={handleBonesUpdate}
+            speed={1.0}
           />
         )}
         <Gltf
