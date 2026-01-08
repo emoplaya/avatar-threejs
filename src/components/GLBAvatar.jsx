@@ -41,14 +41,6 @@ const dactMap = {
   я: "ya",
 };
 
-// Буквы с базовыми анимациями (для fallback)
-const fallbackAnimations = {
-  а: "Idle", // Используем Idle как базовую анимацию
-  б: "Idle",
-  в: "Idle",
-  // ... добавьте другие буквы при необходимости
-};
-
 const processText = (text) => {
   return text
     .toLowerCase()
@@ -73,10 +65,15 @@ export const GLBAvatar = ({
   const [loadedAnimations, setLoadedAnimations] = useState(0);
   const [loadingStatus, setLoadingStatus] = useState("Загрузка анимаций...");
 
+  // Рефы для управления анимациями
   const isPlayingDactylRef = useRef(false);
   const dactylQueueRef = useRef([]);
   const currentLetterIndexRef = useRef(0);
   const baseAnimationRef = useRef(null);
+  const currentActionRef = useRef(null);
+  const previousActionRef = useRef(null);
+  const fadeDurationRef = useRef(0.3); // Длительность плавного перехода (в секундах)
+  const pendingTimeoutRef = useRef(null);
 
   // Инициализация миксера для дактильных анимаций
   useEffect(() => {
@@ -95,7 +92,6 @@ export const GLBAvatar = ({
         setLoadingStatus("Анимации загружены");
         setDactylMixerReady(true);
 
-        // Логируем статус загрузки
         console.log(
           `Загружено анимаций: ${
             Object.keys(dactylActionsRef.current).filter(
@@ -109,7 +105,6 @@ export const GLBAvatar = ({
     letters.forEach((letter) => {
       const animName = dactMap[letter];
 
-      // Проверяем существование файла перед загрузкой
       fetch(`/models/anims/d_${animName}.glb`, { method: "HEAD" })
         .then((response) => {
           if (!response.ok) {
@@ -142,9 +137,7 @@ export const GLBAvatar = ({
               }
               updateLoadingStatus();
             },
-            (progress) => {
-              // Прогресс загрузки
-            },
+            undefined,
             (error) => {
               console.warn(
                 `Файл анимации для буквы "${letter}" не найден, используем fallback`
@@ -178,6 +171,9 @@ export const GLBAvatar = ({
         dactylMixerRef.current.stopAllAction();
       }
       dactylQueueRef.current = [];
+      if (pendingTimeoutRef.current) {
+        clearTimeout(pendingTimeoutRef.current);
+      }
     };
   }, [scene]);
 
@@ -198,7 +194,46 @@ export const GLBAvatar = ({
     }
   }, [actions, animation]);
 
-  // Воспроизведение дактиля
+  // Функция для плавного перехода между анимациями
+  const fadeToAction = useCallback((newAction) => {
+    if (!dactylMixerRef.current) return;
+
+    if (currentActionRef.current) {
+      // Плавный переход от текущей анимации к новой
+      newAction.reset();
+      newAction.setEffectiveWeight(1);
+      newAction.fadeIn(fadeDurationRef.current);
+
+      // Плавно убираем предыдущую анимацию
+      currentActionRef.current.fadeOut(fadeDurationRef.current);
+
+      // Запускаем новую анимацию
+      newAction.play();
+      previousActionRef.current = currentActionRef.current;
+    } else {
+      // Если нет текущей анимации, просто запускаем новую
+      newAction.reset();
+      newAction.setEffectiveWeight(1);
+      newAction.fadeIn(fadeDurationRef.current);
+      newAction.play();
+    }
+
+    currentActionRef.current = newAction;
+  }, []);
+
+  // Очистка всех дактильных анимаций
+  const clearDactylAnimations = useCallback(() => {
+    if (currentActionRef.current) {
+      currentActionRef.current.fadeOut(fadeDurationRef.current);
+      currentActionRef.current = null;
+    }
+    if (previousActionRef.current) {
+      previousActionRef.current.fadeOut(fadeDurationRef.current);
+      previousActionRef.current = null;
+    }
+  }, []);
+
+  // Воспроизведение дактиля с плавными переходами
   useEffect(() => {
     if (
       !dactylMixerReady ||
@@ -231,10 +266,8 @@ export const GLBAvatar = ({
       baseAnimationRef.current.stop();
     }
 
-    // Очищаем микшер дактиля
-    if (dactylMixerRef.current) {
-      dactylMixerRef.current.stopAllAction();
-    }
+    // Очищаем предыдущие дактильные анимации
+    clearDactylAnimations();
 
     const playNextLetter = () => {
       if (currentLetterIndexRef.current >= dactylQueueRef.current.length) {
@@ -244,9 +277,11 @@ export const GLBAvatar = ({
 
       const letter = dactylQueueRef.current[currentLetterIndexRef.current];
 
-      // Пропускаем пробелы
+      // Пропускаем пробелы - делаем паузу между словами
       if (letter === " ") {
         console.log("Пауза (пробел)");
+
+        // Во время паузы продолжаем показывать последнюю анимацию
         setTimeout(() => {
           currentLetterIndexRef.current++;
           playNextLetter();
@@ -257,67 +292,63 @@ export const GLBAvatar = ({
       const letterData = dactylActionsRef.current[letter];
 
       if (!letterData || !letterData.available) {
-        console.warn(
-          `Анимация для буквы "${letter}" недоступна, используем fallback`
-        );
+        console.warn(`Анимация для буквы "${letter}" недоступна, пропускаем`);
 
-        // Показываем букву в консоли или UI
-        console.log(`Буква: ${letter}`);
+        // Показываем букву в консоли
+        console.log(`Пропущена буква: ${letter}`);
 
-        // Используем базовую анимацию как fallback
-        if (actions[fallbackAnimations[letter] || "Idle"]) {
-          const fallbackAction = actions[fallbackAnimations[letter] || "Idle"];
-          fallbackAction.reset().play();
-
-          setTimeout(() => {
-            fallbackAction.stop();
-            currentLetterIndexRef.current++;
-            playNextLetter();
-          }, 500);
-        } else {
-          // Просто пауза для отсутствующей анимации
-          setTimeout(() => {
-            currentLetterIndexRef.current++;
-            playNextLetter();
-          }, 300);
-        }
+        // Пропускаем букву
+        setTimeout(() => {
+          currentLetterIndexRef.current++;
+          playNextLetter();
+        }, 300);
         return;
       }
 
       console.log(`Воспроизведение буквы: ${letter}`);
 
-      // Останавливаем предыдущую анимацию
-      dactylMixerRef.current.stopAllAction();
-
-      // Воспроизводим текущую букву
+      // Плавный переход к новой анимации
       const action = letterData.action;
-      action.reset().play();
+      fadeToAction(action);
+
+      // Рассчитываем время до следующей буквы
+      const timeUntilNext = Math.max(
+        letterData.duration * 1000 - fadeDurationRef.current * 1000,
+        100 // Минимум 100мс
+      );
 
       // Планируем следующую букву
-      setTimeout(() => {
+      pendingTimeoutRef.current = setTimeout(() => {
         currentLetterIndexRef.current++;
         playNextLetter();
-      }, letterData.duration * 1000 + 200);
+      }, timeUntilNext);
     };
 
     const finishDactyl = () => {
       console.log("Дактиль завершен");
       isPlayingDactylRef.current = false;
 
+      // Плавно завершаем последнюю анимацию
+      if (currentActionRef.current) {
+        currentActionRef.current.fadeOut(fadeDurationRef.current);
+      }
+
       setTimeout(() => {
         onStopDactyl();
+        clearDactylAnimations();
 
+        // Возвращаем базовую анимацию
         if (baseAnimationRef.current && animation !== "None") {
           baseAnimationRef.current.reset().fadeIn(0.5).play();
         }
-      }, 500);
+      }, fadeDurationRef.current * 1000);
     };
 
     playNextLetter();
 
     return () => {
-      if (dactylMixerRef.current) {
-        dactylMixerRef.current.stopAllAction();
+      if (pendingTimeoutRef.current) {
+        clearTimeout(pendingTimeoutRef.current);
       }
     };
   }, [
@@ -328,6 +359,8 @@ export const GLBAvatar = ({
     mixer,
     animation,
     actions,
+    fadeToAction,
+    clearDactylAnimations,
   ]);
 
   // Обновление микшеров
@@ -343,9 +376,16 @@ export const GLBAvatar = ({
 
   // Функция для принудительной остановки дактиля
   const stopDactyl = useCallback(() => {
+    if (pendingTimeoutRef.current) {
+      clearTimeout(pendingTimeoutRef.current);
+    }
+
     if (dactylMixerRef.current) {
       dactylMixerRef.current.stopAllAction();
     }
+
+    clearDactylAnimations();
+
     isPlayingDactylRef.current = false;
     dactylQueueRef.current = [];
     onStopDactyl();
@@ -353,7 +393,7 @@ export const GLBAvatar = ({
     if (baseAnimationRef.current && animation !== "None") {
       baseAnimationRef.current.reset().fadeIn(0.5).play();
     }
-  }, [onStopDactyl, animation]);
+  }, [onStopDactyl, animation, clearDactylAnimations]);
 
   useEffect(() => {
     if (!playDactyl && isPlayingDactylRef.current) {
