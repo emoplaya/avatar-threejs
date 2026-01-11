@@ -54,6 +54,7 @@ export const GLBAvatar = ({
   playDactyl = false,
   onStopDactyl = () => {},
   animation = "Idle",
+  dactylSpeed = 1.0, // Новая пропса для скорости
   ...props
 }) => {
   const { scene, animations } = useGLTF(`models/${avatar}`);
@@ -72,8 +73,18 @@ export const GLBAvatar = ({
   const baseAnimationRef = useRef(null);
   const currentActionRef = useRef(null);
   const previousActionRef = useRef(null);
-  const fadeDurationRef = useRef(0.3); // Длительность плавного перехода (в секундах)
+  const fadeDurationRef = useRef(0.3);
   const pendingTimeoutRef = useRef(null);
+  const currentSpeedRef = useRef(1.0); // Реф для текущей скорости
+
+  // Обновляем скорость при изменении пропсы
+  useEffect(() => {
+    currentSpeedRef.current = dactylSpeed;
+    if (dactylMixerRef.current && isPlayingDactylRef.current) {
+      dactylMixerRef.current.timeScale = dactylSpeed;
+      console.log(`Скорость дактиля изменена: ${dactylSpeed}x`);
+    }
+  }, [dactylSpeed]);
 
   // Инициализация миксера для дактильных анимаций
   useEffect(() => {
@@ -195,31 +206,37 @@ export const GLBAvatar = ({
   }, [actions, animation]);
 
   // Функция для плавного перехода между анимациями
-  const fadeToAction = useCallback((newAction) => {
-    if (!dactylMixerRef.current) return;
+  const fadeToAction = useCallback(
+    (newAction, speed = currentSpeedRef.current) => {
+      if (!dactylMixerRef.current) return;
 
-    if (currentActionRef.current) {
-      // Плавный переход от текущей анимации к новой
-      newAction.reset();
-      newAction.setEffectiveWeight(1);
-      newAction.fadeIn(fadeDurationRef.current);
+      // Устанавливаем скорость для действия
+      newAction.setEffectiveTimeScale(speed);
 
-      // Плавно убираем предыдущую анимацию
-      currentActionRef.current.fadeOut(fadeDurationRef.current);
+      if (currentActionRef.current) {
+        // Плавный переход от текущей анимации к новой
+        newAction.reset();
+        newAction.setEffectiveWeight(1);
+        newAction.fadeIn(fadeDurationRef.current);
 
-      // Запускаем новую анимацию
-      newAction.play();
-      previousActionRef.current = currentActionRef.current;
-    } else {
-      // Если нет текущей анимации, просто запускаем новую
-      newAction.reset();
-      newAction.setEffectiveWeight(1);
-      newAction.fadeIn(fadeDurationRef.current);
-      newAction.play();
-    }
+        // Плавно убираем предыдущую анимацию
+        currentActionRef.current.fadeOut(fadeDurationRef.current);
 
-    currentActionRef.current = newAction;
-  }, []);
+        // Запускаем новую анимацию
+        newAction.play();
+        previousActionRef.current = currentActionRef.current;
+      } else {
+        // Если нет текущей анимации, просто запускаем новую
+        newAction.reset();
+        newAction.setEffectiveWeight(1);
+        newAction.fadeIn(fadeDurationRef.current);
+        newAction.play();
+      }
+
+      currentActionRef.current = newAction;
+    },
+    []
+  );
 
   // Очистка всех дактильных анимаций
   const clearDactylAnimations = useCallback(() => {
@@ -252,11 +269,17 @@ export const GLBAvatar = ({
     }
 
     console.log(`Начинаем воспроизведение дактиля: "${userText}"`);
+    console.log(`Скорость: ${currentSpeedRef.current}x`);
     console.log(`Обработанные символы: ${letters.join("")}`);
 
     isPlayingDactylRef.current = true;
     dactylQueueRef.current = letters;
     currentLetterIndexRef.current = 0;
+
+    // Устанавливаем скорость миксера
+    if (dactylMixerRef.current) {
+      dactylMixerRef.current.timeScale = currentSpeedRef.current;
+    }
 
     // Останавливаем базовую анимацию
     if (mixer) {
@@ -281,11 +304,14 @@ export const GLBAvatar = ({
       if (letter === " ") {
         console.log("Пауза (пробел)");
 
+        // Учитываем скорость при паузе
+        const pauseDuration = Math.max(500 / currentSpeedRef.current, 200);
+
         // Во время паузы продолжаем показывать последнюю анимацию
         setTimeout(() => {
           currentLetterIndexRef.current++;
           playNextLetter();
-        }, 500);
+        }, pauseDuration);
         return;
       }
 
@@ -294,34 +320,36 @@ export const GLBAvatar = ({
       if (!letterData || !letterData.available) {
         console.warn(`Анимация для буквы "${letter}" недоступна, пропускаем`);
 
-        // Показываем букву в консоли
-        console.log(`Пропущена буква: ${letter}`);
+        // Учитываем скорость при пропуске буквы
+        const skipDuration = Math.max(300 / currentSpeedRef.current, 150);
 
-        // Пропускаем букву
         setTimeout(() => {
           currentLetterIndexRef.current++;
           playNextLetter();
-        }, 300);
+        }, skipDuration);
         return;
       }
 
-      console.log(`Воспроизведение буквы: ${letter}`);
+      console.log(
+        `Воспроизведение буквы: ${letter} (${currentSpeedRef.current}x)`
+      );
 
       // Плавный переход к новой анимации
       const action = letterData.action;
-      fadeToAction(action);
+      fadeToAction(action, currentSpeedRef.current);
 
-      // Рассчитываем время до следующей буквы
-      const timeUntilNext = Math.max(
+      // Рассчитываем время до следующей буквы с учетом скорости
+      const baseDuration = Math.max(
         letterData.duration * 1000 - fadeDurationRef.current * 1000,
-        100 // Минимум 100мс
+        100
       );
+      const adjustedDuration = baseDuration / currentSpeedRef.current;
 
       // Планируем следующую букву
       pendingTimeoutRef.current = setTimeout(() => {
         currentLetterIndexRef.current++;
         playNextLetter();
-      }, timeUntilNext);
+      }, adjustedDuration);
     };
 
     const finishDactyl = () => {
@@ -370,7 +398,9 @@ export const GLBAvatar = ({
     }
 
     if (dactylMixerRef.current) {
-      dactylMixerRef.current.update(delta);
+      // Умножаем delta на скорость для плавного воспроизведения
+      const scaledDelta = delta * currentSpeedRef.current;
+      dactylMixerRef.current.update(scaledDelta);
     }
   });
 

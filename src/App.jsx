@@ -1,10 +1,11 @@
 import { Loader } from "@react-three/drei";
 import { Canvas } from "@react-three/fiber";
-import { Suspense, useEffect } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { CameraWidget } from "./components/CameraWidget";
 import { Experience } from "./components/Experience";
 import { UI } from "./components/UI";
 import { MetricsMonitor } from "./components/MetricsMonitor";
+import { DactylModal } from "./components/DactylModal";
 
 function initMetricsSystem() {
   console.log("🚀 Система мониторинга метрик инициализирована");
@@ -19,8 +20,14 @@ function initMetricsSystem() {
   console.log("  - MOS (оценка пользователей)");
   console.log("=============================================");
 }
-
 function App() {
+  const [dactylText, setDactylText] = useState("");
+  const [playDactyl, setPlayDactyl] = useState(false);
+  const [isProcessingDactyl, setIsProcessingDactyl] = useState(false);
+  const [currentLetter, setCurrentLetter] = useState("");
+  const [showBonesInfo, setShowBonesInfo] = useState(false);
+  const [dactylSpeed, setDactylSpeed] = useState(1.0);
+
   useEffect(() => {
     initMetricsSystem();
 
@@ -49,19 +56,93 @@ function App() {
     return () => clearInterval(interval);
   }, []);
 
+  const handleDactylSubmit = (text, speed = dactylSpeed) => {
+    setDactylText(text);
+    setPlayDactyl(true);
+    setIsProcessingDactyl(true);
+    setDactylSpeed(speed);
+  };
+
+  const handleDactylClear = () => {
+    setDactylText("");
+    setPlayDactyl(false);
+    setIsProcessingDactyl(false);
+    setCurrentLetter("");
+  };
+
+  const handleStopDactyl = () => {
+    setPlayDactyl(false);
+    setIsProcessingDactyl(false);
+    setCurrentLetter("");
+  };
+
+  const handleSpeedChange = (speed) => {
+    setDactylSpeed(speed);
+  };
+
   return (
     <>
       <UI />
       <CameraWidget />
       <MetricsMonitor />
+
+      {/* Компактное дактильное окно в левом углу */}
+      <DactylModal
+        isVisible={true}
+        onTextSubmit={handleDactylSubmit}
+        onClear={handleDactylClear}
+        isProcessing={isProcessingDactyl}
+        currentLetter={currentLetter}
+        dactylText={dactylText}
+        onBonesToggle={setShowBonesInfo}
+        showBones={showBonesInfo}
+        onSpeedChange={handleSpeedChange}
+        currentSpeed={dactylSpeed}
+      />
+
+      {/* Стиль для анимации спиннера */}
+      <style>
+        {`
+          @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+          }
+          
+          /* Делаем канвас на весь экран */
+          .canvas-container {
+            position: fixed !important;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 1;
+          }
+          
+          /* UI элементы поверх канваса */
+          .ui-overlay {
+            position: fixed;
+            z-index: 1000;
+          }
+        `}
+      </style>
+
       <Loader />
-      <Canvas shadows camera={{ position: [0.25, 0.25, 2], fov: 30 }}>
-        <color attach="background" args={["#333"]} />
-        <fog attach="fog" args={["#333", 10, 20]} />
-        <Suspense>
-          <Experience />
-        </Suspense>
-      </Canvas>
+      <div className="canvas-container">
+        <Canvas shadows camera={{ position: [0.25, 0.25, 2], fov: 30 }}>
+          <color attach="background" args={["#333"]} />
+          <fog attach="fog" args={["#333", 10, 20]} />
+          <Suspense>
+            <Experience
+              dactylText={dactylText}
+              playDactyl={playDactyl}
+              onStopDactyl={handleStopDactyl}
+              showBonesInfo={showBonesInfo}
+              onCurrentLetterUpdate={setCurrentLetter}
+              dactylSpeed={dactylSpeed}
+            />
+          </Suspense>
+        </Canvas>
+      </div>
     </>
   );
 }
